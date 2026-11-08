@@ -1,4 +1,5 @@
 """演示和互动循环，以及退出时的硬件释放。"""
+import json
 import time
 from servo import SmoothServo
 from sensors import StableInput
@@ -39,6 +40,12 @@ from config import (
     TOUCH_HOLD_MS,
     REMOTE_TIMEOUT_MS,
     TELEMETRY_INTERVAL_MS,
+    CLOUD_ENABLED,
+    CLOUD_WIFI_SSID,
+    CLOUD_WIFI_PASSWORD,
+    CLOUD_API_BASE,
+    CLOUD_TOKEN,
+    CLOUD_POLL_INTERVAL_MS,
 )
 
 def move_and_wait(pan, tilt, pan_target, tilt_target):
@@ -90,18 +97,29 @@ def run_interaction(pan, tilt):
     from remote import ModeController, USBLink
     controller = ModeController(REMOTE_TIMEOUT_MS)
     link = USBLink()
+    cloud = None
+    if CLOUD_ENABLED:
+        from cloud import CloudClient
+        cloud = CloudClient(CLOUD_WIFI_SSID, CLOUD_WIFI_PASSWORD, CLOUD_API_BASE,
+                            CLOUD_TOKEN, CLOUD_POLL_INTERVAL_MS)
+        try:
+            cloud.connect()
+            print("云端连接成功。")
+        except Exception as error:
+            print("云端连接失败，继续本地互动：", error)
+            cloud = None
     last_report = time.ticks_ms()
     print("互动开始：左红外转左，右红外转右，摸头低头。")
 
     try:
         _interaction_loop(pan, tilt, oled, touch, left_ir, right_ir,
-                          controller, link, last_report)
+                          controller, link, last_report, cloud)
     finally:
         link.close()
 
 
 def _interaction_loop(pan, tilt, oled, touch, left_ir, right_ir,
-                      controller, link, last_report):
+                      controller, link, last_report, cloud=None):
     last_seen_at = None
     last_near_target = PAN_HOME_NS
     last_blink = time.ticks_ms()
@@ -109,10 +127,19 @@ def _interaction_loop(pan, tilt, oled, touch, left_ir, right_ir,
     shown = None
     previous_mode = "standalone"
     touch_feedback = TouchLatch(TOUCH_HOLD_MS)
+    last_cloud_report = time.ticks_add(time.ticks_ms(), -CLOUD_POLL_INTERVAL_MS)
     while True:
         now = time.ticks_ms()
         for line in link.read_lines():
             controller.receive(line, now)
+        cloud_status = cloud.poll(now) if cloud is not None else None
+        if cloud_status is not None:
+            desired = cloud_status.get("desired_mode")
+            if desired in ("eyes", "weather", "memo"):
+                cloud_mode = "ros2" if desired == "eyes" else "standalone"
+                controller.receive(json.dumps({
+                    "v": 1, "mode": cloud_mode, "action": "idle"
+                }), now)
         centered = (pan.current == PAN_HOME_NS and tilt.current == TILT_HOME_NS)
         mode = controller.update(now, centered)
         if mode != previous_mode:
@@ -171,10 +198,15 @@ def _interaction_loop(pan, tilt, oled, touch, left_ir, right_ir,
             shown = expression
 
         if time.ticks_diff(now, last_report) >= TELEMETRY_INTERVAL_MS:
-            link.send({"v": 1, "touch": touched, "left": left, "right": right,
+            report = {"v": 1, "touch": touched, "left": left, "right": right,
                        "mode": mode, "touch_raw": touch.raw_level,
                        "left_raw": left_ir.raw_level, "right_raw": right_ir.raw_level,
-                       "pan_ns": pan.current, "tilt_ns": tilt.current})
+                       "pan_ns": pan.current, "tilt_ns": tilt.current}
+            link.send(report)
+            if (cloud is not None and
+                    time.ticks_diff(now, last_cloud_report) >= CLOUD_POLL_INTERVAL_MS):
+                cloud.report(report)
+                last_cloud_report = now
             last_report = now
         time.sleep_ms(5)
 

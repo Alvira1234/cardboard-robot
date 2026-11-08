@@ -5,6 +5,14 @@
 # interaction 保留为 standalone 的兼容名称。demo 仍可用于空载演示。
 MODE = "standalone"
 
+# Optional phone control. Keep disabled until Wi-Fi and the API are configured.
+CLOUD_ENABLED = False
+CLOUD_WIFI_SSID = "604"
+CLOUD_WIFI_PASSWORD = "sxkj123456"
+CLOUD_API_BASE = "https://paper-robot-control.alvira0alvira.workers.dev"       # HTTPS origin only, without /api.
+CLOUD_TOKEN = "3lIO9cQ4uHD42pTLDFSx+B2N0NyIarvaaW4BRCrS21mvAb6alZTYmmkO5ini8wCT"          # The same 32+ character token entered in the web page.
+CLOUD_POLL_INTERVAL_MS = 5000
+
 PAN_PIN = 5                  # 第一只舵机的信号线：负责左右转头。
 TILT_PIN = 6                 # 第二只舵机的信号线：负责低头、抬回。
 LEFT_IR_PIN = 4              # 面对屏幕时，你左边的红外模块 OUT。
